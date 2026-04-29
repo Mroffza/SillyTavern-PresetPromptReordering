@@ -1,11 +1,17 @@
 .entry-number-input {
-    font-weight: bold;
+    width: 45px;
+    min-width: 45px;
+    height: 24px;
+    margin-right: 8px;
+    padding: 2px 4px;
     text-align: center;
-    padding: 2px 5px;
+    font-weight: bold;
+    font-size: 12px;
     border: 1px solid var(--SmartThemeBorderColor);
-    background-color: var(--SmartThemeBlurTintColor);
+    background-color: var(--black30a);
     color: var(--SmartThemeBodyColor);
     border-radius: 4px;
+    flex-shrink: 0;
 }
 
 .entry-number-input:hover {
@@ -14,6 +20,11 @@
 
 .entry-number-input:focus {
     outline: none;
-    border-color: var(--SmartThemeHighlightColor);
-    box-shadow: 0 0 3px var(--SmartThemeHighlightColor);
+    border-color: var(--SmartThemeUnderlineColor);
+    box-shadow: 0 0 3px var(--SmartThemeUnderlineColor);
+}
+
+/* กันไม่ให้ input ไปชน drag handle */
+.completion_prompt_manager_prompt {
+    align-items: center;
 }

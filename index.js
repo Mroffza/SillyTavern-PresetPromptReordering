@@ -1,93 +1,141 @@
-import { saveSettingsDebounced } from "../../../../script.js";
-import { extension_settings, getContext } from "../../../extensions.js";
+import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
+import { getContext } from "../../../extensions.js";
 
-const extensionName = "preset-entry-reordering";
-const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
+const LIST_ID = 'completion_prompt_manager_list';
+
+function getPromptManager() {
+    const ctx = getContext();
+    return ctx.promptManager || window.promptManager || null;
+}
+
+function getActiveOrder(pm) {
+    if (!pm || !pm.activeCharacter) return null;
+    const charId = pm.activeCharacter.id;
+    const entry = pm.serviceSettings.prompt_order.find(o => o.character_id === charId);
+    return entry ? entry.order : null;
+}
 
 function addEntryNumbers() {
-    const entryElements = document.querySelectorAll('.world_entry');
+    const list = document.getElementById(LIST_ID);
+    if (!list) return;
 
-    entryElements.forEach((entryEl, index) => {
-        if (entryEl.querySelector('.entry-number-input')) return;
+    const items = list.querySelectorAll('li.completion_prompt_manager_prompt');
+    let visibleIndex = 0;
 
-        const entryHeader = entryEl.querySelector('.world_entry_form_header');
-        if (!entryHeader) return;
+    items.forEach((li) => {
+        // ข้าม header row
+        if (li.classList.contains('completion_prompt_manager_list_head')) return;
+        if (li.classList.contains('completion_prompt_manager_list_separator')) return;
 
-        const numberInput = document.createElement('input');
-        numberInput.type = 'number';
-        numberInput.className = 'entry-number-input text_pole';
-        numberInput.value = index + 1;
-        numberInput.min = 1;
-        numberInput.style.width = '60px';
-        numberInput.style.marginRight = '10px';
-        numberInput.title = 'Entry position (change to reorder)';
+        visibleIndex++;
+        const currentPos = visibleIndex;
 
-        numberInput.addEventListener('change', (e) => {
-            handleEntryReorder(entryEl, parseInt(e.target.value) - 1);
+        let input = li.querySelector('.entry-number-input');
+        if (input) {
+            input.value = currentPos;
+            return;
+        }
+
+        input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'entry-number-input';
+        input.value = currentPos;
+        input.min = 1;
+        input.title = 'ตำแหน่งของ entry (แก้เลขเพื่อย้าย)';
+
+        // กันไม่ให้ event ไปกระตุ้น drag/click ของ list
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        input.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+        input.addEventListener('change', (e) => {
+            e.stopPropagation();
+            const newPos = parseInt(e.target.value, 10) - 1;
+            const identifier = li.getAttribute('data-pm-identifier');
+            if (identifier && !isNaN(newPos)) {
+                reorderPrompt(identifier, newPos);
+            }
         });
 
-        entryHeader.insertBefore(numberInput, entryHeader.firstChild);
+        // วาง input ไว้หน้าสุดของ <li>
+        li.insertBefore(input, li.firstChild);
     });
 }
 
-function handleEntryReorder(entryElement, newIndex) {
-    const context = getContext();
-    const worldInfo = context.worldInfoData;
+function reorderPrompt(identifier, newIndex) {
+    const pm = getPromptManager();
+    if (!pm) {
+        console.error('[PER] PromptManager not found');
+        return;
+    }
 
-    if (!worldInfo || !worldInfo.entries) return;
+    const order = getActiveOrder(pm);
+    if (!order) {
+        console.error('[PER] Active prompt order not found');
+        return;
+    }
 
-    const entryUid = entryElement.getAttribute('data-uid');
-    if (!entryUid) return;
-
-    const currentIndex = worldInfo.entries.findIndex(e => e.uid === parseInt(entryUid));
+    const currentIndex = order.findIndex(p => p.identifier === identifier);
     if (currentIndex === -1) return;
 
     if (newIndex < 0) newIndex = 0;
-    if (newIndex >= worldInfo.entries.length) newIndex = worldInfo.entries.length - 1;
+    if (newIndex >= order.length) newIndex = order.length - 1;
+    if (newIndex === currentIndex) return;
 
-    const [movedEntry] = worldInfo.entries.splice(currentIndex, 1);
-    worldInfo.entries.splice(newIndex, 0, movedEntry);
+    const [moved] = order.splice(currentIndex, 1);
+    order.splice(newIndex, 0, moved);
 
-    saveSettingsDebounced();
-    refreshEntryList();
+    // บันทึกและ re-render
+    if (typeof pm.saveServiceSettings === 'function') {
+        pm.saveServiceSettings().then(() => {
+            pm.render();
+            setTimeout(addEntryNumbers, 100);
+        });
+    } else {
+        saveSettingsDebounced();
+        pm.render();
+        setTimeout(addEntryNumbers, 100);
+    }
 }
 
-function refreshEntryList() {
-    const context = getContext();
-    if (context.worldInfoGrid) {
-        context.worldInfoGrid.refresh();
-    }
-    setTimeout(() => addEntryNumbers(), 100);
+function setupObserver() {
+    const list = document.getElementById(LIST_ID);
+    if (!list) return false;
+
+    const observer = new MutationObserver(() => {
+        // debounce เล็กน้อย
+        clearTimeout(window.__perDebounce);
+        window.__perDebounce = setTimeout(addEntryNumbers, 50);
+    });
+
+    observer.observe(list, { childList: true, subtree: true });
+    addEntryNumbers();
+    return true;
 }
-
-const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0) {
-            const hasEntries = Array.from(mutation.addedNodes).some(node =>
-                node.classList && (node.classList.contains('world_entry') ||
-                node.querySelector && node.querySelector('.world_entry'))
-            );
-
-            if (hasEntries) {
-                setTimeout(() => addEntryNumbers(), 50);
-                break;
-            }
-        }
-    }
-});
 
 jQuery(async () => {
-    console.log('Loading Preset Entry Reordering extension');
+    console.log('[PER] Loading Preset Entry Reordering');
 
+    // รอให้ prompt manager พร้อม
     const checkInterval = setInterval(() => {
-        const worldInfoContainer = document.querySelector('#world_info');
-        if (worldInfoContainer) {
+        if (document.getElementById(LIST_ID)) {
             clearInterval(checkInterval);
-            observer.observe(worldInfoContainer, {
-                childList: true,
-                subtree: true
-            });
-            addEntryNumbers();
+            setupObserver();
         }
     }, 500);
+
+    // hook event ของ ST เผื่อ list ถูก re-render
+    if (eventSource && event_types) {
+        const refreshEvents = [
+            event_types.SETTINGS_UPDATED,
+            event_types.CHAT_CHANGED,
+            event_types.CHATCOMPLETION_SOURCE_CHANGED,
+        ].filter(Boolean);
+
+        refreshEvents.forEach(ev => {
+            eventSource.on(ev, () => {
+                setTimeout(addEntryNumbers, 200);
+            });
+        });
+    }
 });
