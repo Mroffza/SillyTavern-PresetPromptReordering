@@ -9,7 +9,7 @@ SillyTavern extension to reorder prompt entries in Chat Completion presets by ed
 
 ## Installation
 1. SillyTavern → Extensions → Install Extension
-2. Paste: `https://github.com/Mroffza/Preset-Prompt-Reordering`
+2. Paste: `https://github.com/Mroffza/SillyTavern-PresetPromptReordering`
 3. Click Install
 
 ## Usage
